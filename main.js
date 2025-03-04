@@ -12,7 +12,59 @@ document.addEventListener('DOMContentLoaded', () => {
   const resetCamera = document.getElementById('resetCamera');
   const modelDetails = document.getElementById('modelDetails');
   const toggleBonesBtn = document.getElementById('toggleBones');
+  const toggleMeshBtn = document.getElementById('toggleMesh');
   const toggleGridBtn = document.getElementById('toggleGrid');
+  const toggleAnimationBtn = document.getElementById('toggleAnimation');
+  const animationInput = document.getElementById('animationInput');
+  const animationInputLabel = document.getElementById('animationInputLabel');
+  const convertToMixamoBtn = document.getElementById('convertToMixamo');
+  const exportModelBtn = document.getElementById('exportModel');
+
+  // HTML要素のデバッグ出力
+  console.log('メッシュボタン:', toggleMeshBtn);
+  console.log('ボーンボタン:', toggleBonesBtn);
+  console.log('グリッドボタン:', toggleGridBtn);
+  
+  // メッシュ表示切り替え関数
+  const toggleMeshVisibility = () => {
+    console.log('メッシュ表示切り替え関数が呼び出されました');
+    if (!currentModel) {
+      console.log('モデルが読み込まれていません');
+      return;
+    }
+    
+    // 表示状態を反転
+    meshVisible = !meshVisible;
+    console.log(`メッシュ表示状態を ${meshVisible ? 'オン' : 'オフ'} に設定します`);
+    
+    // メッシュを検索して表示/非表示を切り替える
+    let meshCount = 0;
+    currentModel.traverse((object) => {
+      if (object.isMesh) {
+        object.visible = meshVisible;
+        meshCount++;
+        console.log(`メッシュを${meshVisible ? '表示' : '非表示'}に設定: ${object.name || '名前なし'}`);
+      }
+    });
+    
+    console.log(`合計 ${meshCount} 個のメッシュを${meshVisible ? '表示' : '非表示'}に設定しました`);
+    
+    // レンダリングを強制的に更新
+    renderer.render(scene, camera);
+  };
+  
+  // ボタンのイベントリスナーを直接設定
+  if (toggleMeshBtn) {
+    // 直接的なイベント設定方法を使用
+    toggleMeshBtn.onclick = toggleMeshVisibility;
+    console.log('メッシュボタンにonclickイベントを設定しました');
+    
+    // 初期状態では無効化
+    toggleMeshBtn.disabled = true;
+    toggleMeshBtn.style.opacity = 0.5;
+  } else {
+    console.error('メッシュボタン要素が見つかりません');
+  }
 
   // 要素が見つからない場合は処理を中止
   if (!viewport) {
@@ -29,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // カメラの視野距離を拡大（far値を大きく設定）
   const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 10000);
-  camera.position.set(5, 5, 5);
+  camera.position.set(150, 150, 150);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(width, height);
@@ -38,6 +90,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  controls.target.set(0, 0, 0);
+  controls.update();
 
   // ライトの追加
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -131,6 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let skeletonHelper = null;
   let bonesVisible = false;
   let gridVisible = true; // グリッド表示状態を管理する変数
+  let meshVisible = true; // メッシュ表示状態を管理する変数
 
   // グリッドのサイズを更新する関数
   const updateGrid = (modelSize) => {
@@ -332,13 +387,40 @@ document.addEventListener('DOMContentLoaded', () => {
             skeletonHelper = null;
           }
           
+          // メッシュ表示状態をリセット（初期状態は表示）
+          meshVisible = true;
+          
+          // モデルのスケールを元のサイズに設定
+          object.scale.set(1.0, 1.0, 1.0);
+          console.log('FBXモデルのスケールを元のサイズに設定しました');
+          
           // モデルのバウンディングボックスを計算して中心と大きさを取得
           const box = new THREE.Box3().setFromObject(object);
-          const size = box.getSize(new THREE.Vector3());
           const center = box.getCenter(new THREE.Vector3());
+          const size = box.getSize(new THREE.Vector3());
           
-          console.log(`FBXモデルのサイズ: X=${size.x}, Y=${size.y}, Z=${size.z}`);
-          console.log(`FBXモデルの中心: X=${center.x}, Y=${center.y}, Z=${center.z}`);
+          // モデル情報を表示
+          if (modelDetails) {
+            const meshCount = countMeshes(object);
+            const vertexCount = countVertices(object);
+            const polygonCount = countPolygons(object);
+            
+            modelDetails.innerHTML = `
+              <p>ファイル名: ${file.name}</p>
+              <p>モデルサイズ: 
+                幅 ${size.x.toFixed(2)}、
+                高さ ${size.y.toFixed(2)}、
+                奥行き ${size.z.toFixed(2)}
+              </p>
+              <p>メッシュ数: ${meshCount}</p>
+              <p>頂点数: ${vertexCount.toLocaleString()}</p>
+              <p>ポリゴン数: ${polygonCount.toLocaleString()}</p>
+            `;
+          }
+          
+          // FBXモデルの階層構造をコンソールに出力（デバッグ用）
+          console.log('FBXモデルの階層構造:');
+          logObjectHierarchy(object);
           
           // モデルの最大サイズを取得
           const maxModelDimension = Math.max(size.x, size.y, size.z);
@@ -352,6 +434,16 @@ document.addEventListener('DOMContentLoaded', () => {
           
           scene.add(object);
           currentModel = object;
+          console.log('現在のモデルを設定しました:', currentModel);
+          
+          // モデル内のメッシュ数を確認
+          let directMeshCount = 0;
+          object.traverse((child) => {
+            if (child.isMesh || (child.geometry && child.material)) {
+              directMeshCount++;
+            }
+          });
+          console.log(`モデル内のメッシュ数: ${directMeshCount}`);
 
           // モデル内のボーン・スケルトンを探索
           let skeletonsFound = false;
@@ -403,6 +495,13 @@ document.addEventListener('DOMContentLoaded', () => {
               bonesVisible = false;
               skeletonHelper.visible = false;
             }
+          }
+
+          // メッシュ表示ボタンを有効化
+          if (toggleMeshBtn) {
+            toggleMeshBtn.disabled = false;
+            toggleMeshBtn.style.opacity = 1;
+            console.log('メッシュ表示ボタンを有効化しました');
           }
 
           scene.add(skeletonHelper);
@@ -507,14 +606,16 @@ document.addEventListener('DOMContentLoaded', () => {
             scene.remove(skeletonHelper);
             skeletonHelper = null;
           }
+
+          // メッシュ表示状態をリセット（初期状態は表示）
+          meshVisible = true;
           
           // モデルの位置を調整（グリッドの上に配置）
           const object = gltf.scene;
           
-          // GLBモデルはメートル単位のことが多いため、スケールを調整
-          // GLBモデルを100倍に拡大（メートル→センチメートル）
-          object.scale.set(100, 100, 100);
-          console.log('GLBモデルのスケールを調整しました (100倍)');
+          // モデルのスケールを元のサイズに設定
+          object.scale.set(1.0, 1.0, 1.0);
+          console.log('GLBモデルのスケールを元のサイズに設定しました');
           
           // モデルのバウンディングボックスを計算して中心と大きさを取得
           const box = new THREE.Box3().setFromObject(object);
@@ -575,18 +676,18 @@ document.addEventListener('DOMContentLoaded', () => {
               toggleBonesBtn.disabled = false;
               toggleBonesBtn.style.opacity = 1;
               console.log('ボーン表示ボタンを有効化しました');
-              
-              // ボーン付きモデルの場合、デフォルトでボーン表示を有効に
-              bonesVisible = true;
-              skeletonHelper.visible = true;
-              console.log('ボーン付きモデルを検出したため、ボーン表示をデフォルトでオンにしました');
             } else {
               toggleBonesBtn.disabled = true;
               toggleBonesBtn.style.opacity = 0.5;
               console.log('このモデルにはボーンがないため、ボーン表示ボタンを無効化しました');
-              bonesVisible = false;
-              skeletonHelper.visible = false;
             }
+          }
+
+          // メッシュ表示ボタンを有効化
+          if (toggleMeshBtn) {
+            toggleMeshBtn.disabled = false;
+            toggleMeshBtn.style.opacity = 1;
+            console.log('メッシュ表示ボタンを有効化しました');
           }
 
           scene.add(skeletonHelper);
@@ -719,24 +820,18 @@ document.addEventListener('DOMContentLoaded', () => {
           Math.max(maxDim, size.y) * 1.5,
           center.z + maxDim * 2
         );
+        camera.lookAt(center);
         controls.target.copy(center);
+        console.log('カメラ位置をリセットしました');
       } else {
+        // モデルがロードされていない場合は初期位置に戻す
         camera.position.set(150, 150, 150);
         controls.target.set(0, 0, 0);
+        console.log('カメラを初期位置にリセットしました');
       }
       controls.update();
-      
-      // ユーザーが明示的にグリッドを非表示にしていない場合のみ表示
-      if (gridVisible && grid) {
-        grid.visible = true;
-      }
     });
   }
-
-  // 初期カメラ位置の設定（初期グリッドに合わせる）
-  camera.position.set(150, 150, 150);
-  controls.target.set(0, 0, 0);
-  controls.update();
 
   // グリッド表示ボタン
   if (toggleGridBtn) {
