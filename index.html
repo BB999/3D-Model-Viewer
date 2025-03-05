@@ -19,17 +19,28 @@
     <div id="container">
         <div id="viewport"></div>
         <div id="controls">
-            <input type="file" id="fileInput" accept=".fbx,.glb" aria-label="3Dモデルファイルを選択">
+            <div class="file-input-wrapper">
+                <label for="fileInput">モデル選択</label>
+                <input type="file" id="fileInput" accept=".fbx,.glb" aria-label="3Dモデルファイルを選択">
+            </div>
             <button id="resetCamera" aria-label="カメラをリセット">カメラリセット</button>
             <button id="toggleBones" aria-label="ボーンの表示/非表示">ボーン</button>
             <button id="toggleMesh" aria-label="メッシュの表示/非表示">メッシュ</button>
             <button id="toggleGrid" aria-label="グリッドの表示/非表示">グリット</button>
+            <div id="animationControls" class="animation-controls">
+                <div class="file-input-wrapper">
+                    <label for="animationFile">アニメーション選択</label>
+                    <input type="file" id="animationFile" accept=".fbx" aria-label="アニメーションファイルを選択">
+                </div>
+                <button id="playAnimation" aria-label="アニメーション再生" disabled>再生</button>
+                <button id="stopAnimation" aria-label="アニメーション停止" disabled>停止</button>
+            </div>
         </div>
         
-        <!-- 常時表示モデル情報パネル -->
+        <!-- 常時表示情報パネル -->
         <div id="modelInfoPanel" class="model-info-panel visible">
             <div class="panel-header">
-                <h3>モデル情報</h3>
+                <h3>情報</h3>
             </div>
             <div id="modelDetails" class="panel-content"></div>
         </div>

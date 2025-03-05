@@ -19,11 +19,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const animationInputLabel = document.getElementById('animationInputLabel');
   const convertToMixamoBtn = document.getElementById('convertToMixamo');
   const exportModelBtn = document.getElementById('exportModel');
+  const animationFile = document.getElementById('animationFile');
+  const playAnimationBtn = document.getElementById('playAnimation');
+  const stopAnimationBtn = document.getElementById('stopAnimation');
 
   // HTML要素のデバッグ出力
   console.log('メッシュボタン:', toggleMeshBtn);
   console.log('ボーンボタン:', toggleBonesBtn);
   console.log('グリッドボタン:', toggleGridBtn);
+  console.log('アニメーションファイル入力:', animationFile);
+  console.log('再生ボタン:', playAnimationBtn);
+  console.log('停止ボタン:', stopAnimationBtn);
+  
+  // アニメーション関連の変数
+  let mixer = null;
+  let animations = [];
+  let animationAction = null;
+  let clock = new THREE.Clock();
+  let isAnimating = false;
+  
+  // ファイル名を保存する変数
+  let currentModelFileName = '';
+  let currentAnimationFileName = '';
   
   // メッシュ表示切り替え関数
   const toggleMeshVisibility = () => {
@@ -348,6 +365,12 @@ document.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(animate);
     controls.update();
     
+    // アニメーションミキサーの更新
+    if (mixer && isAnimating) {
+      const delta = clock.getDelta();
+      mixer.update(delta);
+    }
+    
     // グリッドの表示状態を維持（ユーザーが明示的に非表示にした場合を除く）
     if (grid && !grid.visible && gridVisible) {
       grid.visible = true;
@@ -370,6 +393,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // FBXモデルのロード関数
   const loadFBXModel = (file) => {
     console.log(`${file.name}の読み込みを開始します...`);
+    
+    // モデルファイル名を保存
+    currentModelFileName = file.name;
+    
+    // アニメーションが変わるのでファイル名をリセット
+    currentAnimationFileName = '';
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -387,12 +416,46 @@ document.addEventListener('DOMContentLoaded', () => {
             skeletonHelper = null;
           }
           
+          // アニメーション関連の変数をリセット
+          if (mixer) {
+            mixer = null;
+            animations = [];
+            animationAction = null;
+            isAnimating = false;
+            
+            // ボタンを無効化
+            playAnimationBtn.disabled = true;
+            stopAnimationBtn.disabled = true;
+            
+            // クラスを削除
+            playAnimationBtn.classList.remove('active');
+            stopAnimationBtn.classList.remove('active');
+          }
+          
           // メッシュ表示状態をリセット（初期状態は表示）
           meshVisible = true;
+          
+          // アニメーションミキサーの作成
+          mixer = new THREE.AnimationMixer(object);
           
           // モデルのスケールを元のサイズに設定
           object.scale.set(1.0, 1.0, 1.0);
           console.log('FBXモデルのスケールを元のサイズに設定しました');
+          
+          // モデル内の既存アニメーションを探す
+          if (object.animations && object.animations.length > 0) {
+            console.log(`モデルに ${object.animations.length} 個のアニメーションが含まれています`);
+            animations = object.animations;
+            
+            // モデル内蔵アニメーションがある場合、その情報を表示
+            currentAnimationFileName = 'モデル内蔵アニメーション';
+            
+            // アニメーションボタンを有効化
+            playAnimationBtn.disabled = false;
+            stopAnimationBtn.disabled = false;
+          } else {
+            console.log('モデルにアニメーションは含まれていません');
+          }
           
           // モデルのバウンディングボックスを計算して中心と大きさを取得
           const box = new THREE.Box3().setFromObject(object);
@@ -562,11 +625,8 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log(`検出された頂点数: ${vertexCount}`);
           console.log(`検出されたポリゴン数: ${polygonCount}`);
 
-          // モデル情報の表示
-          modelDetails.innerHTML = `
-            <p>サイズ: ${(file.size / 1024).toFixed(2)} KB</p>
-            <p>ポリゴン数: ${polygonCount.toLocaleString()}</p>
-          `;
+          // モデル情報の表示（ファイル名を追加）
+          updateModelInfo(file.size, meshCount, vertexCount, polygonCount);
 
           console.log(`${file.name}の読み込みが完了しました`);
         },
@@ -587,10 +647,183 @@ document.addEventListener('DOMContentLoaded', () => {
     reader.readAsDataURL(file);
   };
 
+  // モデル情報の更新関数
+  const updateModelInfo = (fileSize, meshCount, vertexCount, polygonCount) => {
+    if (!modelDetails) return;
+    
+    // 情報パネルの内容を更新
+    let infoHTML = '';
+    
+    // モデルファイル名
+    if (currentModelFileName) {
+      infoHTML += `<p><strong>モデル:</strong> ${currentModelFileName}</p>`;
+    }
+    
+    // アニメーションファイル名
+    if (currentAnimationFileName) {
+      infoHTML += `<p><strong>アニメーション:</strong> ${currentAnimationFileName}</p>`;
+    }
+    
+    // ポリゴン数のみ表示（他の情報は削除）
+    infoHTML += `
+      <p><strong>ポリゴン数:</strong> ${polygonCount.toLocaleString()}</p>
+    `;
+    
+    modelDetails.innerHTML = infoHTML;
+  };
+
+  // FBXアニメーションの読み込み関数
+  const loadFBXAnimation = (file) => {
+    console.log(`アニメーションファイル ${file.name} の読み込みを開始します...`);
+    
+    // モデルが読み込まれていなければエラー表示
+    if (!currentModel || !mixer) {
+      alert('先にモデルを読み込んでください');
+      return;
+    }
+    
+    // アニメーションファイル名を保存
+    currentAnimationFileName = file.name;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const loader = new FBXLoader();
+      loader.load(
+        e.target.result,
+        (animationObject) => {
+          console.log('アニメーションを読み込みました:', animationObject);
+          
+          // アニメーションが含まれているか確認
+          if (animationObject.animations && animationObject.animations.length > 0) {
+            console.log(`${animationObject.animations.length} 個のアニメーションが見つかりました`);
+            
+            // 既存のアニメーションをクリア
+            animations = [];
+            
+            // 新しいアニメーションを追加
+            animations = animationObject.animations;
+            
+            // アニメーションをミキサーにセット
+            if (animations.length > 0) {
+              // 既存のアクションがあれば停止
+              if (animationAction) {
+                animationAction.stop();
+              }
+              
+              // 最初のアニメーションを使用
+              const animation = animations[0];
+              console.log(`アニメーション "${animation.name}" を適用します`);
+              
+              // モデルにアニメーションを適用
+              animationAction = mixer.clipAction(animation);
+              animationAction.setLoop(THREE.LoopRepeat);
+              animationAction.clampWhenFinished = false;
+              
+              // ボタンを有効化
+              playAnimationBtn.disabled = false;
+              stopAnimationBtn.disabled = false;
+              
+              // モデル情報パネルを更新（アニメーション名を含める）
+              if (currentModel) {
+                const box = new THREE.Box3().setFromObject(currentModel);
+                const size = box.getSize(new THREE.Vector3());
+                const meshCount = countMeshes(currentModel);
+                const vertexCount = countVertices(currentModel);
+                const polygonCount = countPolygons(currentModel);
+                
+                // ファイルサイズは元のモデルのものを使用
+                const fileInput = document.getElementById('fileInput');
+                const fileSize = fileInput.files[0] ? fileInput.files[0].size : 0;
+                
+                updateModelInfo(fileSize, meshCount, vertexCount, polygonCount);
+              }
+              
+              console.log('アニメーションの準備が完了しました');
+              
+              // 自動的に再生開始
+              playAnimation();
+            }
+          } else {
+            console.warn('アニメーションファイルにアニメーションが含まれていません');
+            alert('アニメーションが見つかりませんでした');
+            
+            // アニメーションが見つからなかった場合、ファイル名をクリア
+            currentAnimationFileName = '';
+            
+            // モデル情報を更新
+            if (currentModel) {
+              const fileInput = document.getElementById('fileInput');
+              const fileSize = fileInput.files[0] ? fileInput.files[0].size : 0;
+              const meshCount = countMeshes(currentModel);
+              const vertexCount = countVertices(currentModel);
+              const polygonCount = countPolygons(currentModel);
+              updateModelInfo(fileSize, meshCount, vertexCount, polygonCount);
+            }
+          }
+        },
+        // 進行状況のコールバック
+        (xhr) => {
+          if (xhr.total && xhr.total > 0) {
+            const percent = (xhr.loaded / xhr.total) * 100;
+            console.log(`アニメーション読み込み: ${percent.toFixed(2)}%`);
+          }
+        },
+        // エラーコールバック
+        (err) => {
+          console.error('アニメーションのロードに失敗しました:', err);
+          alert('アニメーションの読み込みに失敗しました');
+        }
+      );
+    };
+    reader.readAsDataURL(file);
+  };
+  
+  // アニメーション再生関数
+  const playAnimation = () => {
+    if (!mixer || !animationAction) {
+      console.warn('再生可能なアニメーションがありません');
+      return;
+    }
+    
+    // アニメーションを再生
+    animationAction.reset();
+    animationAction.play();
+    isAnimating = true;
+    
+    // ボタンの見た目を更新
+    playAnimationBtn.classList.add('active');
+    stopAnimationBtn.classList.remove('active');
+    
+    console.log('アニメーションを再生しています');
+  };
+  
+  // アニメーション停止関数
+  const stopAnimation = () => {
+    if (!mixer || !animationAction) {
+      return;
+    }
+    
+    // アニメーションを停止
+    animationAction.stop();
+    isAnimating = false;
+    
+    // ボタンの見た目を更新
+    playAnimationBtn.classList.remove('active');
+    stopAnimationBtn.classList.add('active');
+    
+    console.log('アニメーションを停止しました');
+  };
+
   // GLBモデルのロード関数
   const loadGLBModel = (file) => {
     console.log(`${file.name}の読み込みを開始します...`);
-
+    
+    // モデルファイル名を保存
+    currentModelFileName = file.name;
+    
+    // アニメーションが変わるのでファイル名をリセット
+    currentAnimationFileName = '';
+    
     const reader = new FileReader();
     reader.onload = (e) => {
       const loader = new GLTFLoader();
@@ -748,11 +981,8 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log(`検出された頂点数: ${vertexCount}`);
           console.log(`検出されたポリゴン数: ${polygonCount}`);
 
-          // モデル情報の表示
-          modelDetails.innerHTML = `
-            <p>サイズ: ${(file.size / 1024).toFixed(2)} KB</p>
-            <p>ポリゴン数: ${polygonCount.toLocaleString()}</p>
-          `;
+          // モデル情報の表示（ファイル名を追加）
+          updateModelInfo(file.size, meshCount, vertexCount, polygonCount);
 
           console.log(`${file.name}の読み込みが完了しました`);
         },
@@ -788,6 +1018,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     });
+  }
+  
+  // アニメーションファイル選択イベント
+  if (animationFile) {
+    animationFile.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const fileExtension = file.name.toLowerCase().split('.').pop();
+        if (fileExtension === 'fbx') {
+          loadFBXAnimation(file);
+        } else {
+          alert('FBXアニメーションファイルを選択してください');
+        }
+      }
+    });
+  }
+  
+  // 再生ボタンのイベントリスナー
+  if (playAnimationBtn) {
+    playAnimationBtn.addEventListener('click', playAnimation);
+  }
+  
+  // 停止ボタンのイベントリスナー
+  if (stopAnimationBtn) {
+    stopAnimationBtn.addEventListener('click', stopAnimation);
   }
 
   // ボーン表示ボタン
