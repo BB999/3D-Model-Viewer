@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let animationAction = null;
   let clock = new THREE.Clock();
   let isAnimating = false;
+  let originalModelPosition = new THREE.Vector3();
   
   // ファイル名を保存する変数
   let currentModelFileName = '';
@@ -98,7 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // カメラの視野距離を拡大（far値を大きく設定）
   const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 10000);
-  camera.position.set(150, 150, 150);
+  // 初期カメラ位置を少し近く設定
+  camera.position.set(50, 50, 50);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(width, height);
@@ -578,9 +580,9 @@ document.addEventListener('DOMContentLoaded', () => {
           // モデルの中心と大きさを計算し、カメラの位置を調整
           const maxDim = maxModelDimension;
           camera.position.set(
-            center.x + maxDim * 2,
-            Math.max(maxDim, size.y) * 1.5,
-            center.z + maxDim * 2
+            center.x + maxDim * 0.8,  // 2.0から0.8に変更して近づける
+            Math.max(maxDim, size.y) * 0.7,  // 1.5から0.7に変更して近づける
+            center.z + maxDim * 0.8   // 2.0から0.8に変更して近づける
           );
           controls.target.copy(center);
           
@@ -852,8 +854,8 @@ document.addEventListener('DOMContentLoaded', () => {
           
           // モデルのバウンディングボックスを計算して中心と大きさを取得
           const box = new THREE.Box3().setFromObject(object);
-          const size = box.getSize(new THREE.Vector3());
           const center = box.getCenter(new THREE.Vector3());
+          const size = box.getSize(new THREE.Vector3());
           
           console.log(`GLBモデルのサイズ: X=${size.x}, Y=${size.y}, Z=${size.z}`);
           console.log(`GLBモデルの中心: X=${center.x}, Y=${center.y}, Z=${center.z}`);
@@ -934,9 +936,9 @@ document.addEventListener('DOMContentLoaded', () => {
           // モデルの中心と大きさを計算し、カメラの位置を調整
           const maxDim = maxModelDimension;
           camera.position.set(
-            center.x + maxDim * 2,
-            Math.max(maxDim, size.y) * 1.5,
-            center.z + maxDim * 2
+            center.x + maxDim * 0.8,  // 2.0から0.8に変更して近づける
+            Math.max(maxDim, size.y) * 0.7,  // 1.5から0.7に変更して近づける
+            center.z + maxDim * 0.8   // 2.0から0.8に変更して近づける
           );
           controls.target.copy(center);
           
@@ -1071,16 +1073,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const size = box.getSize(new THREE.Vector3());
         const maxDim = Math.max(size.x, size.y, size.z);
         camera.position.set(
-          center.x + maxDim * 2,
-          Math.max(maxDim, size.y) * 1.5,
-          center.z + maxDim * 2
+          center.x + maxDim * 0.8,  // 2.0から0.8に変更して近づける
+          Math.max(maxDim, size.y) * 0.7,  // 1.5から0.7に変更して近づける
+          center.z + maxDim * 0.8   // 2.0から0.8に変更して近づける
         );
         camera.lookAt(center);
         controls.target.copy(center);
         console.log('カメラ位置をリセットしました');
       } else {
         // モデルがロードされていない場合は初期位置に戻す
-        camera.position.set(150, 150, 150);
+        camera.position.set(50, 50, 50);  // 初期位置も近づける
         controls.target.set(0, 0, 0);
         console.log('カメラを初期位置にリセットしました');
       }
@@ -1102,4 +1104,198 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   console.log('FBXビューアが正常に初期化されました');
+
+  // デフォルトモデル（X Bot.fbx）の自動読み込み
+  const loadDefaultModel = () => {
+    console.log('デフォルトモデルを読み込みます: X Bot.fbx');
+    
+    // FBXLoaderを作成
+    const loader = new FBXLoader();
+    
+    // X Bot.fbxを読み込む
+    loader.load(
+      'X Bot.fbx', // モデルファイルのパス
+      (object) => {
+        // モデルロード成功時の処理
+        console.log('デフォルトモデルのロードに成功しました');
+        
+        // 現在のモデルとスケルトンヘルパーをクリア
+        if (currentModel) {
+          scene.remove(currentModel);
+        }
+        
+        if (skeletonHelper) {
+          scene.remove(skeletonHelper);
+          skeletonHelper = null;
+        }
+        
+        // アニメーション関連の変数をリセット
+        if (mixer) {
+          mixer = null;
+          animations = [];
+          animationAction = null;
+          isAnimating = false;
+          
+          // ボタンを無効化
+          playAnimationBtn.disabled = true;
+          stopAnimationBtn.disabled = true;
+          
+          // クラスを削除
+          playAnimationBtn.classList.remove('active');
+          stopAnimationBtn.classList.remove('active');
+        }
+        
+        // メッシュ表示状態をリセット（初期状態は表示）
+        meshVisible = true;
+        
+        // アニメーションミキサーの作成
+        mixer = new THREE.AnimationMixer(object);
+        
+        // モデルのスケールを元のサイズに設定
+        object.scale.set(1.0, 1.0, 1.0);
+        console.log('デフォルトモデルのスケールを元のサイズに設定しました');
+        
+        // モデル内の既存アニメーションを探す
+        if (object.animations && object.animations.length > 0) {
+          console.log(`モデルに ${object.animations.length} 個のアニメーションが含まれています`);
+          animations = object.animations;
+          
+          // モデル内蔵アニメーションがある場合、その情報を表示
+          currentAnimationFileName = 'モデル内蔵アニメーション';
+          
+          // アニメーションボタンを有効化
+          playAnimationBtn.disabled = false;
+          stopAnimationBtn.disabled = false;
+        } else {
+          console.log('モデルにアニメーションは含まれていません');
+        }
+        
+        // モデルのバウンディングボックスを計算して中心と大きさを取得
+        const box = new THREE.Box3().setFromObject(object);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        
+        // モデルをY軸方向に少し持ち上げてグリッドの上に配置
+        object.position.set(0, size.y / 2 * 0.01, 0);
+        
+        // モデルの元の位置を保存（必ず位置設定後に保存）
+        originalModelPosition.copy(object.position);
+        console.log('デフォルトモデルの元の位置を保存:', originalModelPosition);
+        
+        // モデルをシーンに追加
+        scene.add(object);
+        currentModel = object;
+        console.log('デフォルトモデルを設定しました:', currentModel);
+        
+        // モデル内のボーン・スケルトンを探索
+        let skeletonsFound = false;
+        const findSkeletons = (obj) => {
+          if (obj.isSkinnedMesh) {
+            console.log(`スキンメッシュを検出: ${obj.name || 'unnamed'}`);
+            skeletonsFound = true;
+            return true;
+          }
+
+          if (obj.isBone) {
+            console.log(`ボーンを検出: ${obj.name || 'unnamed'}`);
+            skeletonsFound = true;
+            return true;
+          }
+          
+          if (obj.children && obj.children.length > 0) {
+            for (let child of obj.children) {
+              if (findSkeletons(child)) {
+                return true;
+              }
+            }
+          }
+          
+          return false;
+        };
+        
+        // モデル内のボーン・スケルトンを探索
+        findSkeletons(object);
+        
+        // スケルトンヘルパーを作成
+        skeletonHelper = new THREE.SkeletonHelper(object);
+        
+        // ボーン表示ボタンの有効化/無効化
+        if (toggleBonesBtn) {
+          if (skeletonsFound) {
+            toggleBonesBtn.disabled = false;
+            toggleBonesBtn.style.opacity = 1;
+            console.log('ボーン表示ボタンを有効化しました');
+            
+            // ボーン付きモデルの場合、デフォルトでボーン表示を有効に
+            bonesVisible = true;
+            skeletonHelper.visible = true;
+          } else {
+            toggleBonesBtn.disabled = true;
+            toggleBonesBtn.style.opacity = 0.5;
+            bonesVisible = false;
+            skeletonHelper.visible = false;
+          }
+        }
+
+        // メッシュ表示ボタンを有効化
+        if (toggleMeshBtn) {
+          toggleMeshBtn.disabled = false;
+          toggleMeshBtn.style.opacity = 1;
+        }
+
+        scene.add(skeletonHelper);
+
+        // グリッドを確実に表示
+        if (grid) {
+          grid.visible = gridVisible;
+        }
+        
+        // モデルの最大サイズを取得
+        const maxModelDimension = Math.max(size.x, size.y, size.z);
+        
+        // グリッドを更新
+        updateGrid(maxModelDimension);
+
+        // モデルの中心と大きさを計算し、カメラの位置を調整
+        const maxDim = maxModelDimension;
+        camera.position.set(
+          center.x + maxDim * 0.8,  // 2.0から0.8に変更して近づける
+          Math.max(maxDim, size.y) * 0.7,  // 1.5から0.7に変更して近づける
+          center.z + maxDim * 0.8   // 2.0から0.8に変更して近づける
+        );
+        controls.target.copy(center);
+        
+        // カメラの視野距離を調整
+        camera.near = Math.min(0.1, maxDim * 0.01);
+        camera.updateProjectionMatrix();
+        
+        // メッシュ数と頂点数をカウント
+        const meshCount = countMeshes(object);
+        const vertexCount = countVertices(object);
+        const polygonCount = countPolygons(object);
+        
+        // ファイル名を設定
+        currentModelFileName = 'X Bot.fbx';
+        
+        // モデル情報の表示
+        updateModelInfo(0, meshCount, vertexCount, polygonCount);
+        
+        console.log('デフォルトモデルの読み込みが完了しました');
+      },
+      // 進行状況のコールバック
+      (xhr) => {
+        if (xhr.total && xhr.total > 0) {
+          const percent = (xhr.loaded / xhr.total) * 100;
+          console.log(`デフォルトモデルの読み込み: ${percent.toFixed(2)}%`);
+        }
+      },
+      // エラーコールバック
+      (err) => {
+        console.error('デフォルトモデルのロードに失敗しました:', err);
+      }
+    );
+  };
+  
+  // デフォルトモデルを読み込む
+  loadDefaultModel();
 });
