@@ -28,11 +28,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const modelScale = document.getElementById('modelScale');
   const scaleValue = document.getElementById('scaleValue');
   const gravityScale = document.getElementById('gravityScale');
+  const toggleGameModeBtn = document.getElementById('toggleGameMode');
 
   // HTML要素のデバッグ出力
   console.log('メッシュボタン:', toggleMeshBtn);
   console.log('ボーンボタン:', toggleBonesBtn);
   console.log('グリッドボタン:', toggleGridBtn);
+  console.log('ゲームモードボタン:', toggleGameModeBtn);
   console.log('アニメーションファイル入力:', animationFile);
   console.log('再生ボタン:', playAnimationBtn);
   console.log('停止ボタン:', stopAnimationBtn);
@@ -46,6 +48,39 @@ document.addEventListener('DOMContentLoaded', () => {
   let clock = new THREE.Clock();
   let isAnimating = false;
   let originalModelPosition = new THREE.Vector3();
+  
+  // ゲームモード関連の変数
+  let isGameMode = false;
+  let isFBXModel = false;
+  let moveSpeed = 2.0; // 移動速度
+  let keyState = {
+    w: false,
+    s: false,
+    a: false,
+    d: false,
+    Space: false,
+    Shift: false  // シフトキー追加
+  };
+  let isJumping = false;
+  let verticalVelocity = 0;
+  let gravity = 0.098; // 重力加速度
+  let groundY = 0; // 地面のY座標
+  let jumpSpeed = 5; // ジャンプの初速度
+  
+  // 歩行アニメーション関連の変数
+  let walkAnimation = null;
+  let walkAction = null;
+  let isWalking = false;
+  
+  // アイドルアニメーション関連の変数
+  let idleAnimation = null;
+  let idleAction = null;
+  let isIdling = false;
+  
+  // 走るアニメーション関連の変数
+  let runAnimation = null;
+  let runAction = null;
+  let isRunning = false;
   
   // VRMモデル用の変数
   let vrmModel = null;
@@ -457,8 +492,168 @@ document.addEventListener('DOMContentLoaded', () => {
     const delta = clock.getDelta();
     
     // アニメーションミキサーの更新
-    if (mixer && isAnimating) {
+    if (mixer) {
       mixer.update(delta);
+      
+      // アイドルアニメーションの状態を維持
+      if (idleAction && isIdling) {
+        // タイムスケールの確認と修正
+        if (idleAction.timeScale !== 0.5) {
+          idleAction.timeScale = 0.5;
+          idleAction.setEffectiveTimeScale(0.5);
+        }
+        
+        // 無効化されていたら再有効化
+        if (!idleAction.enabled) {
+          idleAction.enabled = true;
+        }
+      }
+      
+      // 歩行アニメーションの状態を維持
+      if (walkAction && isWalking) {
+        // タイムスケールの確認と修正
+        if (walkAction.timeScale !== 1.0) {
+          walkAction.timeScale = 1.0;
+          walkAction.setEffectiveTimeScale(1.0);
+        }
+        
+        // 無効化されていたら再有効化
+        if (!walkAction.enabled) {
+          walkAction.enabled = true;
+        }
+      }
+    }
+    
+    // ゲームモードでの十字キー操作によるモデル移動
+    if (isGameMode && isFBXModel && currentModel) {
+      let directionChanged = false;
+      let isMoving = false;
+      
+      // カメラの向きを取得
+      const cameraDirection = new THREE.Vector3();
+      camera.getWorldDirection(cameraDirection);
+      
+      // カメラの向きから前方と右方向のベクトルを計算
+      const forward = new THREE.Vector3(cameraDirection.x, 0, cameraDirection.z).normalize();
+      // 右方向は前方の垂直方向（外積を使用）- 順序を入れ替えて正しい方向にする
+      const right = new THREE.Vector3().crossVectors(
+        forward,
+        new THREE.Vector3(0, 1, 0) // 上方向
+      ).normalize();
+      
+      // 移動ベクトル
+      const moveVector = new THREE.Vector3(0, 0, 0);
+      
+      if (keyState.w) {
+        // 前方向（カメラが向いている方向）
+        moveVector.add(forward.clone().multiplyScalar(moveSpeed));
+        isMoving = true;
+      }
+      
+      if (keyState.s) {
+        // 後方向（カメラが向いている方向の逆）
+        moveVector.add(forward.clone().multiplyScalar(-moveSpeed));
+        isMoving = true;
+      }
+      
+      if (keyState.a) {
+        // 左方向（カメラの右方向の逆）
+        moveVector.add(right.clone().multiplyScalar(-moveSpeed));
+        isMoving = true;
+      }
+      
+      if (keyState.d) {
+        // 右方向（カメラの右方向）
+        moveVector.add(right.clone().multiplyScalar(moveSpeed));
+        isMoving = true;
+      }
+      
+      // 移動ベクトルがゼロでなければ移動を適用
+      if (moveVector.lengthSq() > 0) {
+        // Shiftキーが押されていれば速度アップ
+        const currentSpeed = keyState.Shift ? moveSpeed * 2.0 : moveSpeed;
+        // 速度を適用
+        moveVector.multiplyScalar(currentSpeed / moveSpeed);
+        
+        // モデルを移動
+        currentModel.position.add(moveVector);
+        
+        // モデルを移動方向に向ける（Y軸回転のみ）
+        const angle = Math.atan2(moveVector.x, moveVector.z);
+        currentModel.rotation.y = angle;
+        
+        directionChanged = true;
+      }
+      
+      // アニメーション制御 - Shiftキーの状態によって走るか歩くかを切り替え
+      if (isMoving) {
+        if (keyState.Shift) {
+          // Shiftキーが押されている場合は走るアニメーション
+          if (runAction && !isRunning) {
+            if (isWalking) {
+              // 歩行から走るへ
+              startRunAnimation();
+            } else if (isIdling) {
+              // アイドルから走るへ
+              startRunAnimation();
+            }
+          }
+        } else {
+          // Shiftキーが押されていない場合は歩行アニメーション
+          if (walkAction && !isWalking) {
+            if (isRunning) {
+              // 走るから歩行へ
+              stopRunAnimation();
+              walkAction.reset();
+              walkAction.timeScale = 1.0;
+              walkAction.setEffectiveTimeScale(1.0);
+              walkAction.setEffectiveWeight(1);
+              walkAction.play();
+              isWalking = true;
+            } else if (isIdling) {
+              // アイドルから歩行へ
+              startWalkAnimation();
+            }
+          }
+        }
+      } else {
+        // 移動していない場合、アニメーションを停止
+        if (isWalking) {
+          // 歩行→アイドル
+          startIdleAnimation();
+        } else if (isRunning) {
+          // 走る→アイドル
+          stopRunAnimation();
+          startIdleAnimation();
+        }
+      }
+      
+      // スペースキーでジャンプ処理
+      if (keyState.Space && !isJumping) {
+        isJumping = true;
+        verticalVelocity = jumpSpeed;
+        console.log('ジャンプ開始');
+      }
+      
+      // ジャンプ中の処理
+      if (isJumping) {
+        // 重力の影響を適用
+        verticalVelocity -= gravity;
+        currentModel.position.y += verticalVelocity;
+        
+        // 地面に着地したかチェック
+        if (currentModel.position.y <= groundY) {
+          currentModel.position.y = groundY;
+          isJumping = false;
+          verticalVelocity = 0;
+          console.log('着地');
+          
+          // 着地後、移動していなければアイドルアニメーションを再生
+          if (!isMoving && !isWalking && !isRunning && idleAction && !isIdling) {
+            startIdleAnimation();
+          }
+        }
+      }
     }
     
     // VRMモデルの更新処理
@@ -544,6 +739,12 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // VRMモデル変数をリセット
     vrmModel = null;
+    
+    // FBXモデルフラグを設定
+    isFBXModel = true;
+    
+    // ゲームモードボタンの状態を更新
+    updateGameModeButtonState();
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -585,6 +786,14 @@ document.addEventListener('DOMContentLoaded', () => {
           
           // アニメーションミキサーの作成
           mixer = new THREE.AnimationMixer(object);
+          console.log('アニメーションミキサーを作成しました:', mixer);
+          
+          // ゲームモードがオンの場合は歩行アニメーションを読み込み
+          if (isGameMode) {
+            loadWalkingAnimation();
+            loadRunAnimation();
+            loadIdleAnimation();
+          }
           
           // モデルのスケールを元のサイズに設定
           object.scale.set(1.0, 1.0, 1.0);
@@ -641,6 +850,12 @@ document.addEventListener('DOMContentLoaded', () => {
           
           // モデルをY軸方向に少し持ち上げてグリッドの上に配置
           object.position.set(0, size.y / 2 * 0.01, 0);
+          
+          // モデルの元の位置を保存（必ず位置設定後に保存）
+          originalModelPosition.copy(object.position);
+          
+          // ジャンプ用に地面のY座標を設定
+          groundY = object.position.y;
           
           scene.add(object);
           currentModel = object;
@@ -978,7 +1193,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // GLBモデルのロード関数
   const loadGLBModel = (file) => {
-    console.log(`${file.name}の読み込みを開始します...`);
+    console.log(`GLBモデル ${file.name} の読み込みを開始します...`);
     
     // モデルファイル名を保存
     currentModelFileName = file.name;
@@ -989,6 +1204,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // VRMモデル変数をリセット
     vrmModel = null;
     
+    // FBXモデルフラグを設定（GLBはFBXではない）
+    isFBXModel = false;
+    
+    // ゲームモードボタンの状態を更新
+    updateGameModeButtonState();
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const loader = new GLTFLoader();
@@ -1035,6 +1256,12 @@ document.addEventListener('DOMContentLoaded', () => {
           
           // モデルをY軸方向に少し持ち上げてグリッドの上に配置
           object.position.set(0, size.y / 2 * 0.01, 0);
+          
+          // モデルの元の位置を保存（必ず位置設定後に保存）
+          originalModelPosition.copy(object.position);
+          
+          // ジャンプ用に地面のY座標を設定
+          groundY = object.position.y;
           
           scene.add(object);
           currentModel = object;
@@ -1181,6 +1408,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // VRMモデルを読み込む関数
   const loadVRMModel = (file) => {
+    console.log(`VRMモデル ${file.name} の読み込みを開始します...`);
+    
+    // モデルファイル名を保存
+    currentModelFileName = file.name;
+    
+    // アニメーションが変わるのでファイル名をリセット
+    currentAnimationFileName = '';
+    
+    // FBXモデルフラグを設定（VRMはFBXではない）
+    isFBXModel = false;
+    
+    // ゲームモードボタンの状態を更新
+    updateGameModeButtonState();
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const arrayBuffer = event.target.result;
@@ -1467,26 +1708,171 @@ document.addEventListener('DOMContentLoaded', () => {
   // カメラリセットボタン
   if (resetCamera) {
     resetCamera.addEventListener('click', () => {
+      console.log('カメラをリセットします');
+      
       if (currentModel) {
         const box = new THREE.Box3().setFromObject(currentModel);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
+        
+        // モデルの中心と大きさを計算し、カメラの位置を調整
         const maxDim = Math.max(size.x, size.y, size.z);
         camera.position.set(
-          center.x + maxDim * 0.8,  // 2.0から0.8に変更して近づける
-          Math.max(maxDim, size.y) * 0.7,  // 1.5から0.7に変更して近づける
-          center.z + maxDim * 0.8   // 2.0から0.8に変更して近づける
+          center.x + maxDim * 0.8,
+          Math.max(maxDim, size.y) * 0.7,
+          center.z + maxDim * 0.8
         );
-        camera.lookAt(center);
         controls.target.copy(center);
-        console.log('カメラ位置をリセットしました');
-      } else {
-        // モデルがロードされていない場合は初期位置に戻す
-        camera.position.set(50, 50, 50);  // 初期位置も近づける
-        controls.target.set(0, 0, 0);
-        console.log('カメラを初期位置にリセットしました');
+        
+        console.log('カメラをリセットしました');
       }
-      controls.update();
+    });
+  }
+
+  // ゲームモードボタンの状態を更新する関数
+  const updateGameModeButtonState = () => {
+    if (toggleGameModeBtn) {
+      if (isFBXModel && currentModel) {
+        // FBXモデルが読み込まれている場合はボタンを有効化
+        toggleGameModeBtn.disabled = false;
+        toggleGameModeBtn.style.opacity = 1;
+      } else {
+        // FBXモデル以外の場合はボタンを無効化
+        toggleGameModeBtn.disabled = true;
+        toggleGameModeBtn.style.opacity = 0.5;
+        
+        // ゲームモードがオンの場合はオフにする
+        if (isGameMode) {
+          isGameMode = false;
+          toggleGameModeBtn.classList.remove('active');
+        }
+      }
+    }
+  };
+  
+  // キーボードキーを押した時のイベントリスナー
+  window.addEventListener('keydown', (e) => {
+    // ゲームモードがオンかつFBXモデルの場合のみ処理
+    if (isGameMode && isFBXModel && currentModel) {
+      // キーの小文字化
+      const key = e.key.toLowerCase();
+      
+      if (key in keyState) {
+        keyState[key] = true;
+        // デフォルトのスクロール動作を防止
+        e.preventDefault();
+      } else if (key === 'shift') {
+        keyState.Shift = true;
+        e.preventDefault();
+      }
+    }
+  });
+  
+  // キーボードキーを離した時のイベントリスナー
+  window.addEventListener('keyup', (e) => {
+    const key = e.key.toLowerCase();
+    
+    if (key in keyState) {
+      keyState[key] = false;
+    } else if (key === 'shift') {
+      keyState.Shift = false;
+    }
+  });
+
+  // ゲームモードボタンのクリックイベント
+  if (toggleGameModeBtn) {
+    toggleGameModeBtn.addEventListener('click', () => {
+      // FBXモデルが読み込まれている場合のみゲームモードを切り替え
+      if (isFBXModel && currentModel) {
+        isGameMode = !isGameMode;
+        
+        if (isGameMode) {
+          toggleGameModeBtn.classList.add('active');
+          console.log('ゲームモードをオンにしました');
+          
+          // ゲームモード中は他のボタンを無効化
+          const otherButtons = document.querySelectorAll('button:not(#toggleGameMode)');
+          otherButtons.forEach(button => {
+            button.disabled = true;
+            button.classList.add('disabled');
+          });
+          
+          // ファイル選択も無効化
+          const fileInputs = document.querySelectorAll('input[type="file"]');
+          fileInputs.forEach(input => {
+            input.disabled = true;
+            input.parentElement.classList.add('disabled');
+          });
+          
+          // 歩行アニメーションをロード
+          if (!walkAnimation || !walkAction) {
+            console.log('歩行アニメーションを新たにロードします');
+            loadWalkingAnimation();
+          } else {
+            console.log('既存の歩行アニメーションを使用します');
+          }
+          
+          // 走るアニメーションをロード
+          if (!runAnimation || !runAction) {
+            console.log('走るアニメーションを新たにロードします');
+            loadRunAnimation();
+          } else {
+            console.log('既存の走るアニメーションを使用します');
+          }
+          
+          // アイドルアニメーションをロード
+          if (!idleAnimation || !idleAction) {
+            console.log('アイドルアニメーションを新たにロードします');
+            loadIdleAnimation();
+          } else {
+            console.log('既存のアイドルアニメーションを使用します');
+            // ゲームモード開始時はアイドル状態から始める
+            startIdleAnimation();
+          }
+        } else {
+          toggleGameModeBtn.classList.remove('active');
+          console.log('ゲームモードをオフにしました');
+          
+          // ゲームモード終了時に他のボタンを再度有効化
+          const otherButtons = document.querySelectorAll('button:not(#toggleGameMode)');
+          otherButtons.forEach(button => {
+            button.disabled = false;
+            button.classList.remove('disabled');
+          });
+          
+          // ファイル選択も再度有効化
+          const fileInputs = document.querySelectorAll('input[type="file"]');
+          fileInputs.forEach(input => {
+            input.disabled = false;
+            input.parentElement.classList.remove('disabled');
+          });
+          
+          // ゲームモードをオフにした場合、モデルを元の位置に戻す
+          if (currentModel) {
+            currentModel.position.copy(originalModelPosition);
+            // モデルの回転もリセット
+            currentModel.rotation.set(0, 0, 0);
+          }
+          
+          // 歩行アニメーションを停止
+          if (walkAction) {
+            walkAction.stop();
+            isWalking = false;
+          }
+          
+          // 走るアニメーションを停止
+          if (runAction) {
+            runAction.stop();
+            isRunning = false;
+          }
+          
+          // アイドルアニメーションを停止
+          if (idleAction) {
+            idleAction.stop();
+            isIdling = false;
+          }
+        }
+      }
     });
   }
 
@@ -1511,6 +1897,12 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // VRMモデル変数をリセット
     vrmModel = null;
+    
+    // FBXモデルフラグを設定（デフォルトモデルはFBX）
+    isFBXModel = true;
+    
+    // ゲームモードボタンの状態を更新
+    updateGameModeButtonState();
     
     // FBXLoaderを作成
     const loader = new FBXLoader();
@@ -1553,6 +1945,14 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // アニメーションミキサーの作成
         mixer = new THREE.AnimationMixer(object);
+        console.log('アニメーションミキサーを作成しました:', mixer);
+        
+        // ゲームモードがオンの場合は歩行アニメーションを読み込み
+        if (isGameMode) {
+          loadWalkingAnimation();
+          loadRunAnimation();
+          loadIdleAnimation();
+        }
         
         // モデルのスケールを元のサイズに設定
         object.scale.set(1.0, 1.0, 1.0);
@@ -1686,6 +2086,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // スケールバーの表示状態を更新
         updateScaleControlVisibility();
         
+        // ゲームモードボタンの状態を更新
+        updateGameModeButtonState();
+        
         console.log('デフォルトモデルの読み込みが完了しました');
       },
       // 進行状況のコールバック
@@ -1773,4 +2176,400 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // 歩行アニメーションをロードする関数
+  const loadWalkingAnimation = () => {
+    console.log('歩行アニメーションを読み込みます');
+    
+    // モデルが読み込まれていなければ何もしない
+    if (!currentModel || !mixer) {
+      console.warn('モデルが読み込まれていないため、歩行アニメーションを読み込めません');
+      return;
+    }
+    
+    // FBXLoaderを作成
+    const loader = new FBXLoader();
+    
+    // パスをログに出力
+    const animationPath = 'animation/Walking.fbx';  // 正しいパスに修正
+    console.log('アニメーションファイルパス:', animationPath);
+    
+    // walking.fbxを読み込む
+    loader.load(
+      animationPath,
+      (animationObject) => {
+        console.log('歩行アニメーションをロードしました:', animationObject);
+        
+        // アニメーションが含まれているか確認
+        if (animationObject.animations && animationObject.animations.length > 0) {
+          console.log(`${animationObject.animations.length} 個の歩行アニメーションが見つかりました`);
+          
+          // 歩行アニメーションを保存
+          walkAnimation = animationObject.animations[0];
+          console.log('歩行アニメーション:', walkAnimation);
+          
+          // ルート移動を無効にするために、位置トラックを除外したアニメーションを作成
+          const tracks = walkAnimation.tracks.filter(track => {
+            // 位置に関連するトラックを除外
+            return !track.name.endsWith('.position');
+          });
+          
+          // 新しいアニメーションクリップを作成
+          const noMoveAnimation = new THREE.AnimationClip(
+            walkAnimation.name + '_NoMove',
+            walkAnimation.duration,
+            tracks
+          );
+          
+          // 修正したアニメーションを使用
+          walkAnimation = noMoveAnimation;
+          
+          // ミキサーにアニメーションをセット
+          walkAction = mixer.clipAction(walkAnimation);
+          walkAction.setLoop(THREE.LoopRepeat);
+          walkAction.clampWhenFinished = false;
+          walkAction.timeScale = 1.0;  // 正常な速度で再生
+          walkAction.weight = 1.0;     // 優先度を最大に
+          walkAction.enabled = true;   // 有効に設定
+          
+          // 位置変更をブレンドで無効化（念のため）
+          walkAction.blendMode = THREE.NormalAnimationBlendMode;  // 通常のブレンドモードに変更
+          
+          console.log('歩行アニメーションの準備ができました:', walkAction);
+          console.log('位置トラックを除外したアニメーショントラック数:', tracks.length);
+        } else {
+          console.warn('歩行アニメーションが見つかりませんでした');
+        }
+      },
+      // 進行状況のコールバック
+      (xhr) => {
+        if (xhr.total && xhr.total > 0) {
+          const percent = (xhr.loaded / xhr.total) * 100;
+          console.log(`歩行アニメーション読み込み: ${percent.toFixed(2)}%`);
+        }
+      },
+      // エラーコールバック
+      (err) => {
+        console.error('歩行アニメーションのロードに失敗しました:', err);
+      }
+    );
+  };
+  
+  // アイドルアニメーションをロードする関数
+  const loadIdleAnimation = () => {
+    console.log('アイドルアニメーションを読み込みます');
+    
+    // モデルが読み込まれていなければ何もしない
+    if (!currentModel || !mixer) {
+      console.warn('モデルが読み込まれていないため、アイドルアニメーションを読み込めません');
+      return;
+    }
+    
+    // FBXLoaderを作成
+    const loader = new FBXLoader();
+    
+    // パスをログに出力
+    const animationPath = 'animation/Standing_Idle.fbx';  // アイドルアニメーションのパス
+    console.log('アイドルアニメーションファイルパス:', animationPath);
+    
+    // Standing_Idle.fbxを読み込む
+    loader.load(
+      animationPath,
+      (animationObject) => {
+        console.log('アイドルアニメーションをロードしました:', animationObject);
+        
+        // アニメーションが含まれているか確認
+        if (animationObject.animations && animationObject.animations.length > 0) {
+          console.log(`${animationObject.animations.length} 個のアイドルアニメーションが見つかりました`);
+          
+          // アイドルアニメーションを保存
+          idleAnimation = animationObject.animations[0];
+          console.log('アイドルアニメーション:', idleAnimation);
+          
+          // ルート移動を無効にするために、位置トラックを除外したアニメーションを作成
+          const tracks = idleAnimation.tracks.filter(track => {
+            // 位置に関連するトラックを除外
+            return !track.name.endsWith('.position');
+          });
+          
+          // 新しいアニメーションクリップを作成
+          const noMoveAnimation = new THREE.AnimationClip(
+            idleAnimation.name + '_NoMove',
+            idleAnimation.duration,
+            tracks
+          );
+          
+          // 修正したアニメーションを使用
+          idleAnimation = noMoveAnimation;
+          
+          // ミキサーにアニメーションをセット
+          idleAction = mixer.clipAction(idleAnimation);
+          idleAction.setLoop(THREE.LoopRepeat);
+          idleAction.clampWhenFinished = false;
+          
+          // アイドルアニメーションのタイムスケールを明示的に設定（半分の速度）
+          idleAction.timeScale = 0.5;
+          console.log('アイドルアニメーションのタイムスケール設定:', idleAction.timeScale);
+          
+          idleAction.weight = 1.0;     // 優先度を最大に
+          idleAction.enabled = true;   // 有効に設定
+          
+          // 位置変更をブレンドで無効化（念のため）
+          idleAction.blendMode = THREE.NormalAnimationBlendMode;  // 通常のブレンドモードに変更
+          
+          console.log('アイドルアニメーションの準備ができました:', idleAction);
+          console.log('位置トラックを除外したアイドルアニメーショントラック数:', tracks.length);
+          
+          // ゲームモードがオンなら、すぐにアイドルアニメーションを開始
+          if (isGameMode && !isWalking && !isJumping) {
+            startIdleAnimation();
+          }
+        } else {
+          console.warn('アイドルアニメーションが見つかりませんでした');
+        }
+      },
+      // 進行状況のコールバック
+      (xhr) => {
+        if (xhr.total && xhr.total > 0) {
+          const percent = (xhr.loaded / xhr.total) * 100;
+          console.log(`アイドルアニメーション読み込み: ${percent.toFixed(2)}%`);
+        }
+      },
+      // エラーコールバック
+      (err) => {
+        console.error('アイドルアニメーションのロードに失敗しました:', err);
+      }
+    );
+  };
+  
+  // アイドルアニメーションを開始する関数
+  const startIdleAnimation = () => {
+    if (!idleAction) return;
+    
+    // 他のアニメーションからのクロスフェード
+    if (walkAction && isWalking) {
+      // 重要: stopAllActionを呼び出さない - Tポーズの原因になる
+      
+      // アイドルアニメーションを準備
+      idleAction.reset();
+      idleAction.timeScale = 0.5;
+      idleAction.setEffectiveTimeScale(0.5);
+      idleAction.setEffectiveWeight(1);
+      
+      // 歩行アニメーションを継続しながら、アイドルにクロスフェード（0.1秒）
+      // 短いフェード時間でTポーズの発生を防止
+      idleAction.enabled = true;
+      walkAction.crossFadeTo(idleAction, 0.1, true);
+      idleAction.play();
+      
+      // 状態を更新
+      isWalking = false;
+      isIdling = true;
+      console.log('歩行からアイドルへ高速クロスフェード - 速度:0.5');
+    } else {
+      // 他のアニメーションがない場合は直接再生
+      idleAction.reset();
+      idleAction.timeScale = 0.5;
+      idleAction.setEffectiveTimeScale(0.5);
+      idleAction.enabled = true;
+      idleAction.setEffectiveWeight(1);
+      idleAction.play();
+      isIdling = true;
+      console.log('アイドルアニメーション開始 - 速度:0.5');
+    }
+  };
+  
+  // アイドルアニメーションを停止する関数
+  const stopIdleAnimation = () => {
+    if (!idleAction) return;
+    
+    idleAction.stop();
+    isIdling = false;
+    console.log('アイドルアニメーション停止');
+  };
+
+  // 走るアニメーションをロードする関数
+  const loadRunAnimation = () => {
+    console.log('走るアニメーションを読み込みます');
+    
+    // モデルが読み込まれていなければ何もしない
+    if (!currentModel || !mixer) {
+      console.warn('モデルが読み込まれていないため、走るアニメーションを読み込めません');
+      return;
+    }
+    
+    // FBXLoaderを作成
+    const loader = new FBXLoader();
+    
+    // パスをログに出力
+    const animationPath = 'animation/Run.fbx';  // 走るアニメーションのパス
+    console.log('走るアニメーションファイルパス:', animationPath);
+    
+    // Run.fbxを読み込む
+    loader.load(
+      animationPath,
+      (animationObject) => {
+        console.log('走るアニメーションをロードしました:', animationObject);
+        
+        // アニメーションが含まれているか確認
+        if (animationObject.animations && animationObject.animations.length > 0) {
+          console.log(`${animationObject.animations.length} 個の走るアニメーションが見つかりました`);
+          
+          // 走るアニメーションを保存
+          runAnimation = animationObject.animations[0];
+          console.log('走るアニメーション:', runAnimation);
+          
+          // ルート移動を無効にするために、位置トラックを除外したアニメーションを作成
+          const tracks = runAnimation.tracks.filter(track => {
+            // 位置に関連するトラックを除外
+            return !track.name.endsWith('.position');
+          });
+          
+          // 新しいアニメーションクリップを作成
+          const noMoveAnimation = new THREE.AnimationClip(
+            runAnimation.name + '_NoMove',
+            runAnimation.duration,
+            tracks
+          );
+          
+          // 修正したアニメーションを使用
+          runAnimation = noMoveAnimation;
+          
+          // ミキサーにアニメーションをセット
+          runAction = mixer.clipAction(runAnimation);
+          runAction.setLoop(THREE.LoopRepeat);
+          runAction.clampWhenFinished = false;
+          runAction.timeScale = 1.0;  // 正常な速度で再生
+          runAction.weight = 1.0;     // 優先度を最大に
+          runAction.enabled = true;   // 有効に設定
+          
+          // 位置変更をブレンドで無効化（念のため）
+          runAction.blendMode = THREE.NormalAnimationBlendMode;
+          
+          console.log('走るアニメーションの準備ができました:', runAction);
+          console.log('位置トラックを除外したアニメーショントラック数:', tracks.length);
+        } else {
+          console.warn('走るアニメーションが見つかりませんでした');
+        }
+      },
+      // 進行状況のコールバック
+      (xhr) => {
+        if (xhr.total && xhr.total > 0) {
+          const percent = (xhr.loaded / xhr.total) * 100;
+          console.log(`走るアニメーション読み込み: ${percent.toFixed(2)}%`);
+        }
+      },
+      // エラーコールバック
+      (err) => {
+        console.error('走るアニメーションのロードに失敗しました:', err);
+      }
+    );
+  };
+  
+  // 走るアニメーションを開始する関数
+  const startRunAnimation = () => {
+    if (!runAction) return;
+    
+    // 他のアニメーションからのクロスフェード
+    if (walkAction && isWalking) {
+      // 歩行アニメーションから走るアニメーションへの遷移
+      runAction.reset();
+      runAction.timeScale = 1.0;
+      runAction.setEffectiveTimeScale(1.0);
+      runAction.setEffectiveWeight(1);
+      
+      // 歩行アニメーションを継続しながら、走るアニメーションにクロスフェード（0.1秒）
+      runAction.enabled = true;
+      walkAction.crossFadeTo(runAction, 0.1, true);
+      runAction.play();
+      
+      // 状態を更新
+      isWalking = false;
+      isRunning = true;
+      console.log('歩行から走るへ高速クロスフェード - 速度:1.0');
+    } else if (idleAction && isIdling) {
+      // アイドルアニメーションから走るアニメーションへの遷移
+      runAction.reset();
+      runAction.timeScale = 1.0;
+      runAction.setEffectiveTimeScale(1.0);
+      runAction.setEffectiveWeight(1);
+      
+      // アイドルアニメーションを継続しながら、走るアニメーションにクロスフェード（0.1秒）
+      runAction.enabled = true;
+      idleAction.crossFadeTo(runAction, 0.1, true);
+      runAction.play();
+      
+      // 状態を更新
+      isIdling = false;
+      isRunning = true;
+      console.log('アイドルから走るへ高速クロスフェード - 速度:1.0');
+    } else {
+      // 他のアニメーションがない場合は直接再生
+      runAction.reset();
+      runAction.timeScale = 1.0;
+      runAction.enabled = true;
+      runAction.setEffectiveWeight(1);
+      runAction.play();
+      isRunning = true;
+      console.log('走るアニメーション開始 - 速度:1.0');
+    }
+  };
+  
+  // 走るアニメーションを停止する関数
+  const stopRunAnimation = () => {
+    if (!runAction) return;
+    
+    runAction.stop();
+    isRunning = false;
+    console.log('走るアニメーション停止');
+  };
+
+  // 歩行アニメーションを開始する関数
+  const startWalkAnimation = () => {
+    if (!walkAction) return;
+    
+    // 現在のモデル位置を記憶して、アニメーション中に維持
+    const currentPos = currentModel.position.clone();
+    
+    // アイドルアニメーションからのクロスフェード
+    if (idleAction && isIdling) {
+      // 歩行アニメーションを準備
+      walkAction.reset();
+      walkAction.timeScale = 1.0;
+      walkAction.setEffectiveTimeScale(1.0);
+      walkAction.setEffectiveWeight(1);
+      
+      // アイドルアニメーションを継続しながら、歩行にクロスフェード（0.1秒）
+      // 短いフェード時間でTポーズの発生を防止
+      walkAction.enabled = true;
+      idleAction.crossFadeTo(walkAction, 0.1, true);
+      walkAction.play();
+      
+      // 状態を更新
+      isIdling = false;
+      isWalking = true;
+      console.log('アイドルから歩行へ高速クロスフェード - 速度:1.0');
+    } else {
+      // 他のアニメーションがない場合は直接再生
+      walkAction.reset();
+      walkAction.timeScale = 1.0;
+      walkAction.setEffectiveTimeScale(1.0);
+      walkAction.enabled = true;
+      walkAction.setEffectiveWeight(1);
+      walkAction.play();
+      isWalking = true;
+      console.log('歩行アニメーション開始 - 速度:1.0');
+    }
+    
+    // アニメーションが位置を変更しないようにするための更新関数
+    const fixPosition = () => {
+      if (isWalking && currentModel) {
+        // ただし、ユーザー入力による移動は許可
+        // ここでは何もしない（キー入力処理で位置を更新）
+      }
+    };
+    
+    // アニメーションイベントリスナー
+    mixer.addEventListener('loop', fixPosition);
+  };
 });

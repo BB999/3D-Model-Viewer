@@ -52,10 +52,11 @@ button:hover, input[type="file"]::file-selector-button:hover {
   background-color: #555;
 }
 
-button:disabled {
-  background-color: #2a2a2a;
-  color: #777;
+button:disabled, input[type="file"]:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
+  background-color: #444;
+  color: #888;
 }
 
 /* ファイル入力のカスタムスタイル */
@@ -88,6 +89,12 @@ button:disabled {
   cursor: pointer;
 }
 
+.file-input-wrapper.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* アニメーション制御部分 */
 .animation-controls {
   display: flex;
@@ -108,6 +115,11 @@ button:disabled {
 
 #stopAnimation.active {
   background-color: #f44336;
+}
+
+/* ゲームモードボタンのスタイル */
+#toggleGameMode.active {
+  background-color: #9c27b0;
 }
 
 /* モデル情報パネル */
