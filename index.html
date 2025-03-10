@@ -3,14 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3Dモデルプレビューア (FBX / GLB)</title>
+    <title>3Dモデルプレビューア (FBX / GLB / VRM)</title>
     <link rel="stylesheet" href="style.css?v=1.0.9">
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+            "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3/lib/three-vrm.module.min.js"
         }
     }
     </script>
@@ -21,12 +22,19 @@
         <div id="controls">
             <div class="file-input-wrapper">
                 <label for="fileInput">モデル選択</label>
-                <input type="file" id="fileInput" accept=".fbx,.glb" aria-label="3Dモデルファイルを選択">
+                <input type="file" id="fileInput" accept=".fbx,.glb,.vrm" aria-label="3Dモデルファイルを選択">
             </div>
             <button id="resetCamera" aria-label="カメラをリセット">カメラリセット</button>
             <button id="toggleBones" aria-label="ボーンの表示/非表示">ボーン</button>
             <button id="toggleMesh" aria-label="メッシュの表示/非表示">メッシュ</button>
             <button id="toggleGrid" aria-label="グリッドの表示/非表示">グリット</button>
+            <button id="rotateModel" aria-label="モデルを回転">モデル回転</button>
+            <button id="switchCamera" aria-label="カメラアングル切替">視点切替</button>
+            <div class="scale-control">
+                <label for="modelScale">スケール: </label>
+                <input type="range" id="modelScale" min="0.1" max="100" step="1" value="1" aria-label="モデルスケール" disabled>
+                <span id="scaleValue">1.0</span>
+            </div>
             <div id="animationControls" class="animation-controls">
                 <div class="file-input-wrapper">
                     <label for="animationFile">アニメーション選択</label>

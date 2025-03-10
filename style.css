@@ -198,3 +198,28 @@ button:disabled {
     max-height: 80vh;
   }
 }
+
+.scale-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 10px;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.scale-control input[type="range"] {
+  width: 200px;
+  cursor: pointer;
+}
+
+.scale-control input[type="range"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.scale-control span {
+  min-width: 50px;
+  text-align: center;
+}

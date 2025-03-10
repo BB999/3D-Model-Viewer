@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VRMLoaderPlugin } from '@pixiv/three-vrm';
 
 // DOMが読み込まれたら実行
 document.addEventListener('DOMContentLoaded', () => {
@@ -14,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleBonesBtn = document.getElementById('toggleBones');
   const toggleMeshBtn = document.getElementById('toggleMesh');
   const toggleGridBtn = document.getElementById('toggleGrid');
+  const rotateModelBtn = document.getElementById('rotateModel');
+  const switchCameraBtn = document.getElementById('switchCamera');
   const toggleAnimationBtn = document.getElementById('toggleAnimation');
   const animationInput = document.getElementById('animationInput');
   const animationInputLabel = document.getElementById('animationInputLabel');
@@ -22,6 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const animationFile = document.getElementById('animationFile');
   const playAnimationBtn = document.getElementById('playAnimation');
   const stopAnimationBtn = document.getElementById('stopAnimation');
+  const modelScale = document.getElementById('modelScale');
+  const scaleValue = document.getElementById('scaleValue');
+  const gravityScale = document.getElementById('gravityScale');
 
   // HTML要素のデバッグ出力
   console.log('メッシュボタン:', toggleMeshBtn);
@@ -30,6 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log('アニメーションファイル入力:', animationFile);
   console.log('再生ボタン:', playAnimationBtn);
   console.log('停止ボタン:', stopAnimationBtn);
+  console.log('スケールスライダー:', modelScale);
+  console.log('重力スライダー:', gravityScale);
   
   // アニメーション関連の変数
   let mixer = null;
@@ -39,9 +47,34 @@ document.addEventListener('DOMContentLoaded', () => {
   let isAnimating = false;
   let originalModelPosition = new THREE.Vector3();
   
+  // VRMモデル用の変数
+  let vrmModel = null;
+  
   // ファイル名を保存する変数
   let currentModelFileName = '';
   let currentAnimationFileName = '';
+  
+  // モデルスケール調整
+  if (modelScale) {
+    modelScale.addEventListener('input', () => {
+      // スケール値を更新
+      const scale = parseFloat(modelScale.value);
+      scaleValue.textContent = scale.toFixed(1);
+      
+      // モデルのスケールを更新
+      if (currentModel) {
+        currentModel.scale.set(scale, scale, scale);
+        
+        // VRMモデルの場合は追加の更新が必要な場合がある
+        if (vrmModel) {
+          // VRMのアップデート関数があれば呼び出す
+          if (typeof vrmModel.update === 'function') {
+            vrmModel.update(0);
+          }
+        }
+      }
+    });
+  }
   
   // メッシュ表示切り替え関数
   const toggleMeshVisibility = () => {
@@ -69,6 +102,54 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // レンダリングを強制的に更新
     renderer.render(scene, camera);
+  };
+  
+  // スケールバーと重力バーの表示状態を更新する関数
+  const updateScaleControlVisibility = () => {
+    if (modelScale) {
+      // VRMモデルが表示されている場合
+      if (vrmModel) {
+        // スケールコントロールを非表示にする
+        modelScale.disabled = true;
+        scaleValue.style.opacity = '0.5';
+        const scaleControl = document.querySelector('.scale-control');
+        scaleControl.style.opacity = '0';
+        scaleControl.style.visibility = 'hidden';
+        
+        // VRMモデルのスケールは70に設定（表示はしないがスケールは適用）
+        if (currentModel) {
+          currentModel.scale.set(70, 70, 70);
+        }
+        
+        // 重力コントロールの表示設定（既存のまま）
+        if (gravityScale && vrmModel.springBoneManager) {
+          gravityScale.disabled = false;
+          const gravityControl = document.querySelector('.gravity-control');
+          gravityControl.style.opacity = '1';
+          gravityControl.style.visibility = 'visible';
+        } else if (gravityScale) {
+          gravityScale.disabled = true;
+          const gravityControl = document.querySelector('.gravity-control');
+          gravityControl.style.opacity = '0';
+          gravityControl.style.visibility = 'hidden';
+        }
+      } else {
+        // VRM以外のモデルの場合（既存の処理のまま）
+        modelScale.disabled = true;
+        scaleValue.style.opacity = '0.5';
+        const scaleControl = document.querySelector('.scale-control');
+        scaleControl.style.opacity = '0';
+        scaleControl.style.visibility = 'hidden';
+        
+        // 重力コントロールも非表示
+        if (gravityScale) {
+          gravityScale.disabled = true;
+          const gravityControl = document.querySelector('.gravity-control');
+          gravityControl.style.opacity = '0';
+          gravityControl.style.visibility = 'hidden';
+        }
+      }
+    }
   };
   
   // ボタンのイベントリスナーを直接設定
@@ -102,9 +183,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // 初期カメラ位置を少し近く設定
   camera.position.set(50, 50, 50);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ 
+    antialias: true,
+    alpha: true
+  });
   renderer.setSize(width, height);
   renderer.shadowMap.enabled = true;
+  // VRMのマテリアルと互換性を持たせる設定
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.useLegacyLights = false;
   viewport.appendChild(renderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -367,10 +454,19 @@ document.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(animate);
     controls.update();
     
+    const delta = clock.getDelta();
+    
     // アニメーションミキサーの更新
     if (mixer && isAnimating) {
-      const delta = clock.getDelta();
       mixer.update(delta);
+    }
+    
+    // VRMモデルの更新処理
+    if (vrmModel) {
+      // VRM 1.0では特別な更新が必要ない場合もある
+      if (typeof vrmModel.update === 'function') {
+        vrmModel.update(delta);
+      }
     }
     
     // グリッドの表示状態を維持（ユーザーが明示的に非表示にした場合を除く）
@@ -392,6 +488,50 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   window.addEventListener('resize', handleResize);
 
+  // モデルとそのリソースを解放するヘルパー関数
+  const disposeModel = (model) => {
+    if (!model) return;
+    
+    console.log('モデルリソースの解放を開始します...');
+    
+    // モデル内のすべてのリソースを再帰的に解放
+    model.traverse((object) => {
+      // ジオメトリを解放
+      if (object.geometry) {
+        object.geometry.dispose();
+      }
+      
+      // マテリアルを解放
+      if (object.material) {
+        if (Array.isArray(object.material)) {
+          // 複数のマテリアルの場合
+          object.material.forEach(material => {
+            disposeMaterial(material);
+          });
+        } else {
+          // 単一のマテリアル
+          disposeMaterial(object.material);
+        }
+      }
+    });
+    
+    console.log('モデルリソースの解放が完了しました');
+  };
+
+  // マテリアルとそのテクスチャを解放
+  const disposeMaterial = (material) => {
+    // テクスチャを解放
+    for (const key in material) {
+      const value = material[key];
+      if (value && typeof value === 'object' && value.isTexture) {
+        value.dispose();
+      }
+    }
+    
+    // マテリアル自体を解放
+    material.dispose();
+  };
+
   // FBXモデルのロード関数
   const loadFBXModel = (file) => {
     console.log(`${file.name}の読み込みを開始します...`);
@@ -401,6 +541,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // アニメーションが変わるのでファイル名をリセット
     currentAnimationFileName = '';
+    
+    // VRMモデル変数をリセット
+    vrmModel = null;
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -409,7 +552,10 @@ document.addEventListener('DOMContentLoaded', () => {
         e.target.result,
         (object) => {
           if (currentModel) {
+            // モデルのリソースを解放してからシーンから削除
+            disposeModel(currentModel);
             scene.remove(currentModel);
+            currentModel = null;
           }
           
           // 以前のスケルトンヘルパーがあれば削除
@@ -486,6 +632,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // FBXモデルの階層構造をコンソールに出力（デバッグ用）
           console.log('FBXモデルの階層構造:');
           logObjectHierarchy(object);
+          console.log('------------------');
           
           // モデルの最大サイズを取得
           const maxModelDimension = Math.max(size.x, size.y, size.z);
@@ -628,7 +775,15 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log(`検出されたポリゴン数: ${polygonCount}`);
 
           // モデル情報の表示（ファイル名を追加）
-          updateModelInfo(file.size, meshCount, vertexCount, polygonCount);
+          updateModelInfo(
+            (file.size / 1024 / 1024).toFixed(2) + ' MB',
+            meshCount,
+            vertexCount,
+            polygonCount
+          );
+          
+          // スケールバーの表示状態を更新
+          updateScaleControlVisibility();
 
           console.log(`${file.name}の読み込みが完了しました`);
         },
@@ -651,27 +806,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // モデル情報の更新関数
   const updateModelInfo = (fileSize, meshCount, vertexCount, polygonCount) => {
-    if (!modelDetails) return;
-    
-    // 情報パネルの内容を更新
-    let infoHTML = '';
-    
-    // モデルファイル名
-    if (currentModelFileName) {
-      infoHTML += `<p><strong>モデル:</strong> ${currentModelFileName}</p>`;
+    if (modelDetails) {
+      // ファイルサイズがnumberの場合はMB単位に変換
+      const fileSizeText = typeof fileSize === 'number' 
+        ? (fileSize / 1024 / 1024).toFixed(2) + ' MB' 
+        : fileSize;
+      
+      modelDetails.innerHTML = `
+        <p>ファイル名: ${currentModelFileName}</p>
+        <p>ファイルサイズ: ${fileSizeText}</p>
+        <p>メッシュ数: ${meshCount}</p>
+        <p>頂点数: ${vertexCount}</p>
+        <p>ポリゴン数: ${polygonCount}</p>
+        ${currentAnimationFileName ? `<p>アニメーション: ${currentAnimationFileName}</p>` : ''}
+      `;
+      
+      // モデルが読み込まれた時点でスケールスライダーを有効化
+      if (modelScale) {
+        // VRMモデル以外の場合のみスケールを1.0に設定
+        if (!vrmModel) {
+          modelScale.disabled = false;
+          // 初期スケールを1に設定
+          modelScale.value = 1;
+          scaleValue.textContent = "1.0";
+          // モデルのスケールを初期化
+          if (currentModel) {
+            currentModel.scale.set(1, 1, 1);
+          }
+        }
+      }
     }
-    
-    // アニメーションファイル名
-    if (currentAnimationFileName) {
-      infoHTML += `<p><strong>アニメーション:</strong> ${currentAnimationFileName}</p>`;
-    }
-    
-    // ポリゴン数のみ表示（他の情報は削除）
-    infoHTML += `
-      <p><strong>ポリゴン数:</strong> ${polygonCount.toLocaleString()}</p>
-    `;
-    
-    modelDetails.innerHTML = infoHTML;
   };
 
   // FBXアニメーションの読み込み関数
@@ -826,6 +990,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // アニメーションが変わるのでファイル名をリセット
     currentAnimationFileName = '';
     
+    // VRMモデル変数をリセット
+    vrmModel = null;
+    
     const reader = new FileReader();
     reader.onload = (e) => {
       const loader = new GLTFLoader();
@@ -833,7 +1000,10 @@ document.addEventListener('DOMContentLoaded', () => {
         e.target.result,
         (gltf) => {
           if (currentModel) {
+            // モデルのリソースを解放してからシーンから削除
+            disposeModel(currentModel);
             scene.remove(currentModel);
+            currentModel = null;
           }
           
           // 以前のスケルトンヘルパーがあれば削除
@@ -930,7 +1100,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // グリッドを確実に表示
           if (grid) {
             grid.visible = gridVisible;
-            console.log(`グリッド表示状態: ${grid.visible ? 'オン' : 'オフ'}`);
+            console.log(`グリッド表示状態: ${gridVisible ? 'オン' : 'オフ'}`);
           }
 
           // モデルの中心と大きさを計算し、カメラの位置を調整
@@ -984,7 +1154,15 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log(`検出されたポリゴン数: ${polygonCount}`);
 
           // モデル情報の表示（ファイル名を追加）
-          updateModelInfo(file.size, meshCount, vertexCount, polygonCount);
+          updateModelInfo(
+            (file.size / 1024 / 1024).toFixed(2) + ' MB',
+            meshCount,
+            vertexCount,
+            polygonCount
+          );
+          
+          // スケールバーの表示状態を更新
+          updateScaleControlVisibility();
 
           console.log(`${file.name}の読み込みが完了しました`);
         },
@@ -1005,22 +1183,231 @@ document.addEventListener('DOMContentLoaded', () => {
     reader.readAsDataURL(file);
   };
 
-  // ファイル選択イベント
-  if (fileInput) {
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        const fileExtension = file.name.toLowerCase().split('.').pop();
-        if (fileExtension === 'fbx') {
-          loadFBXModel(file);
-        } else if (fileExtension === 'glb') {
-          loadGLBModel(file);
-        } else {
-          alert('FBXまたはGLBファイルを選択してください');
-        }
+  // VRMモデルを読み込む関数
+  const loadVRMModel = (file) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const arrayBuffer = event.target.result;
+      
+      // 現在のモデル情報をリセット
+      currentModelFileName = file.name;
+      stopAnimation();
+      
+      // すでにモデルがあれば削除
+      if (currentModel) {
+        // モデルのリソースを解放してからシーンから削除
+        disposeModel(currentModel);
+        scene.remove(currentModel);
+        currentModel = null;
       }
-    });
-  }
+      
+      // スケルトンヘルパーがあれば削除
+      if (skeletonHelper) {
+        scene.remove(skeletonHelper);
+        skeletonHelper = null;
+      }
+      
+      // VRMモデルのリセット
+      vrmModel = null;
+      
+      // ローディング情報を表示
+      updateModelInfo(
+        (file.size / 1024 / 1024).toFixed(2) + ' MB',
+        '読み込み中...',
+        '読み込み中...',
+        '読み込み中...'
+      );
+      
+      // GLTFLoaderを使用してVRMを読み込む
+      const loader = new GLTFLoader();
+      
+      // VRMLoaderPluginを登録
+      loader.register((parser) => {
+        return new VRMLoaderPlugin(parser);
+      });
+      
+      // バッファーから読み込み
+      loader.parse(arrayBuffer, '', (gltf) => {
+        // VRMインスタンスを取得
+        const vrm = gltf.userData.vrm;
+        
+        if (!vrm) {
+          console.error('VRMモデルとして読み込むことができませんでした');
+          return;
+        }
+        
+        // グローバル変数に保存
+        vrmModel = vrm;
+        
+        // モデルを設定
+        currentModel = vrm.scene;
+        
+        // マテリアルの設定（VRMのマテリアルを調整）
+        currentModel.traverse((object) => {
+          if (object.material) {
+            // マテリアルがある場合は設定を調整
+            if (Array.isArray(object.material)) {
+              object.material.forEach(material => {
+                material.transparent = true;
+                material.depthWrite = true;
+                material.side = THREE.DoubleSide;
+              });
+            } else {
+              object.material.transparent = true;
+              object.material.depthWrite = true;
+              object.material.side = THREE.DoubleSide;
+            }
+          }
+        });
+        
+        // まずシーンにモデルを追加
+        scene.add(currentModel);
+        
+        // モデルのバウンディングボックスを計算
+        const bbox = new THREE.Box3().setFromObject(currentModel);
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        
+        // モデルの中心を計算
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+        
+        // モデルの向きを調整（正面がカメラを向くように）
+        // 異なるVRMモデルは異なる座標系を持つ可能性があるため、
+        // 必要に応じて別の方向を試してください
+        if (file.name.toLowerCase().includes('_flipped') || file.name.toLowerCase().includes('_reverse')) {
+          // ファイル名に_flippedや_reverseが含まれる場合は別の回転を適用
+          currentModel.rotation.set(0, Math.PI, 0); // Y軸回りに180度回転
+        } else {
+          // 通常のケース
+          currentModel.rotation.set(0, 0, 0); // 回転なし - 正面を向くように設定
+        }
+        
+        // モデルの位置を原点調整
+        currentModel.position.x = -center.x;
+        currentModel.position.y = -center.y;
+        currentModel.position.z = -center.z;
+        
+        // 元のモデル位置を保存（必ず位置設定後に保存）
+        originalModelPosition.copy(currentModel.position);
+        console.log('VRMモデルの元の位置を保存:', originalModelPosition);
+        
+        // カメラをVRMモデルの大きさに合わせて調整（スケール70を考慮）
+        const vrmScale = 70; // VRMモデルのスケール
+        const scaledMaxDim = maxDim * vrmScale;
+        
+        // スケールを考慮した適切な距離にカメラを配置
+        // 斜めから撮影するようにカメラを配置（X軸とZ軸の両方に値を設定）
+        const cameraDistance = scaledMaxDim * 0.9; // カメラの距離
+        
+        // カメラの角度（ラジアン）- 45度を斜め角度として使用
+        const cameraAngle = Math.PI / 4; // 45度
+        
+        // ファイル名に応じて左右のカメラアングルを選択
+        if (file.name.toLowerCase().includes('_left')) {
+          // 左斜め前からのアングル
+          camera.position.set(
+            -cameraDistance * Math.sin(cameraAngle), // 左側（X軸マイナス方向）
+            scaledMaxDim * 0.6,                     // 高さをより高く設定
+            -cameraDistance * Math.cos(cameraAngle)  // 正面（Z軸マイナス方向）
+          );
+        } else {
+          // デフォルト: 右斜め前からのアングル
+          camera.position.set(
+            cameraDistance * Math.sin(cameraAngle),  // 右側（X軸プラス方向）
+            scaledMaxDim * 0.6,                     // 高さをより高く設定
+            -cameraDistance * Math.cos(cameraAngle)  // 正面（Z軸マイナス方向）
+          );
+        }
+        
+        // モデルの中心付近を見るようにカメラの視点を設定
+        const targetHeight = scaledMaxDim * 0.4; // モデルの中央より上を見る
+        camera.lookAt(0, targetHeight, 0);
+        controls.target.set(0, targetHeight, 0);
+        
+        // カメラの近接面と遠方面を調整
+        camera.near = Math.max(0.1, scaledMaxDim * 0.01);
+        camera.far = scaledMaxDim * 10;
+        camera.updateProjectionMatrix();
+        
+        // OrbitControlsを更新
+        controls.update();
+        
+        // グリッドを更新（スケールを考慮）
+        updateGrid(scaledMaxDim);
+        
+        // モデルの情報を表示
+        let meshCount = 0;
+        let vertexCount = 0;
+        let polygonCount = 0;
+        
+        // メッシュ、頂点、ポリゴン数を計算
+        currentModel.traverse((object) => {
+          if (object.isMesh) {
+            meshCount++;
+            if (object.geometry) {
+              if (object.geometry.attributes.position) {
+                vertexCount += object.geometry.attributes.position.count;
+              }
+              if (object.geometry.index) {
+                polygonCount += object.geometry.index.count / 3;
+              } else if (object.geometry.attributes.position) {
+                polygonCount += object.geometry.attributes.position.count / 3;
+              }
+            }
+          }
+        });
+        
+        // モデル情報を更新
+        updateModelInfo(
+          (file.size / 1024 / 1024).toFixed(2) + ' MB',
+          meshCount.toString(),
+          vertexCount.toString(),
+          Math.floor(polygonCount).toString()
+        );
+        
+        // スケールバーの表示状態を更新
+        updateScaleControlVisibility();
+        
+        // UIボタンを有効化
+        toggleBonesBtn.disabled = false;
+        toggleBonesBtn.style.opacity = 1;
+        toggleMeshBtn.disabled = false;
+        toggleMeshBtn.style.opacity = 1;
+        
+        // アニメーションボタンを有効化（FBXはアニメーションをサポート）
+        playAnimationBtn.disabled = false;
+        stopAnimationBtn.disabled = false;
+        
+        // ログ出力
+        console.log('VRMモデルの読み込みが完了しました', vrm);
+      }, (error) => {
+        console.error('VRMモデルの読み込み中にエラーが発生しました', error);
+      });
+    };
+    
+    reader.readAsArrayBuffer(file);
+  };
+
+  // ファイル選択時の処理
+  fileInput.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const fileName = file.name.toLowerCase();
+    const extension = fileName.split('.').pop();
+
+    if (extension === 'fbx') {
+      loadFBXModel(file);
+    } else if (extension === 'glb') {
+      loadGLBModel(file);
+    } else if (extension === 'vrm') {
+      loadVRMModel(file);
+    } else {
+      alert('サポートされていないファイル形式です。.fbx, .glb または .vrm ファイルを選択してください。');
+    }
+  });
   
   // アニメーションファイル選択イベント
   if (animationFile) {
@@ -1108,6 +1495,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // デフォルトモデル（X Bot.fbx）の自動読み込み
   const loadDefaultModel = () => {
     console.log('デフォルトモデルを読み込みます: X Bot.fbx');
+    
+    // VRMモデル変数をリセット
+    vrmModel = null;
     
     // FBXLoaderを作成
     const loader = new FBXLoader();
@@ -1280,6 +1670,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // モデル情報の表示
         updateModelInfo(0, meshCount, vertexCount, polygonCount);
         
+        // スケールバーの表示状態を更新
+        updateScaleControlVisibility();
+        
         console.log('デフォルトモデルの読み込みが完了しました');
       },
       // 進行状況のコールバック
@@ -1298,4 +1691,73 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // デフォルトモデルを読み込む
   loadDefaultModel();
+
+  // スケールバーの初期表示状態を設定
+  updateScaleControlVisibility();
+
+  // モデル回転ボタンのイベントリスナー
+  if (rotateModelBtn) {
+    rotateModelBtn.addEventListener('click', () => {
+      if (currentModel && vrmModel) {
+        // 現在のY軸回転に180度（π）を加える
+        currentModel.rotation.y = (currentModel.rotation.y + Math.PI) % (Math.PI * 2);
+        console.log(`モデルを回転しました: ${(currentModel.rotation.y / Math.PI).toFixed(2)}π rad`);
+      }
+    });
+  }
+
+  // カメラアングル切替ボタンのイベントリスナー
+  let cameraAngleIndex = 0; // 0: 右斜め前, 1: 左斜め前, 2: 正面
+  if (switchCameraBtn) {
+    switchCameraBtn.addEventListener('click', () => {
+      if (currentModel && vrmModel) {
+        // 次のカメラアングルにインデックスを進める
+        cameraAngleIndex = (cameraAngleIndex + 1) % 3;
+        
+        // VRMモデルのスケールを考慮したカメラ距離を計算
+        const bbox = new THREE.Box3().setFromObject(currentModel);
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scaledMaxDim = maxDim * 70; // VRMスケール
+        const cameraDistance = scaledMaxDim * 0.9;
+        const cameraHeight = scaledMaxDim * 0.6; // 高さをより高く設定
+        const targetHeight = scaledMaxDim * 0.4; // 視点も少し上に調整
+        
+        // カメラの角度（45度）
+        const cameraAngle = Math.PI / 4;
+        
+        switch (cameraAngleIndex) {
+          case 0: // 右斜め前
+            camera.position.set(
+              cameraDistance * Math.sin(cameraAngle),
+              cameraHeight,
+              -cameraDistance * Math.cos(cameraAngle)
+            );
+            break;
+          case 1: // 左斜め前
+            camera.position.set(
+              -cameraDistance * Math.sin(cameraAngle),
+              cameraHeight,
+              -cameraDistance * Math.cos(cameraAngle)
+            );
+            break;
+          case 2: // 正面
+            camera.position.set(
+              0,
+              cameraHeight,
+              -cameraDistance
+            );
+            break;
+        }
+        
+        // カメラの視点を更新
+        camera.lookAt(0, targetHeight, 0);
+        controls.target.set(0, targetHeight, 0);
+        controls.update();
+        
+        console.log(`カメラアングルを切り替えました: ${['右斜め前', '左斜め前', '正面'][cameraAngleIndex]}`);
+      }
+    });
+  }
 });
