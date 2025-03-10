@@ -223,3 +223,8 @@ button:disabled {
   min-width: 50px;
   text-align: center;
 }
+
+/* 重力コントロールを非表示にする */
+.gravity-control {
+  display: none !important;
+}

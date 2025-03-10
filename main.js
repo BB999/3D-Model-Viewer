@@ -623,8 +623,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 高さ ${size.y.toFixed(2)}、
                 奥行き ${size.z.toFixed(2)}
               </p>
-              <p>メッシュ数: ${meshCount}</p>
-              <p>頂点数: ${vertexCount.toLocaleString()}</p>
               <p>ポリゴン数: ${polygonCount.toLocaleString()}</p>
             `;
           }
@@ -815,8 +813,6 @@ document.addEventListener('DOMContentLoaded', () => {
       modelDetails.innerHTML = `
         <p>ファイル名: ${currentModelFileName}</p>
         <p>ファイルサイズ: ${fileSizeText}</p>
-        <p>メッシュ数: ${meshCount}</p>
-        <p>頂点数: ${vertexCount}</p>
         <p>ポリゴン数: ${polygonCount}</p>
         ${currentAnimationFileName ? `<p>アニメーション: ${currentAnimationFileName}</p>` : ''}
       `;
@@ -1369,10 +1365,27 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // スケールバーの表示状態を更新
         updateScaleControlVisibility();
+
+        // VRMモデルのスケルトンヘルパー初期化
+        skeletonHelper = new THREE.SkeletonHelper(currentModel);
+        scene.add(skeletonHelper);
+        
+        // ボーン表示設定
+        let skeletonsFound = false;
+        // VRMモデルには常にスケルトンがあると仮定
+        skeletonsFound = true;
+        
+        // ボーン表示ボタンの有効化
+        if (toggleBonesBtn) {
+          toggleBonesBtn.disabled = false;
+          toggleBonesBtn.style.opacity = 1;
+          
+          // デフォルトでボーン表示を有効に
+          bonesVisible = true;
+          skeletonHelper.visible = true;
+        }
         
         // UIボタンを有効化
-        toggleBonesBtn.disabled = false;
-        toggleBonesBtn.style.opacity = 1;
         toggleMeshBtn.disabled = false;
         toggleMeshBtn.style.opacity = 1;
         
